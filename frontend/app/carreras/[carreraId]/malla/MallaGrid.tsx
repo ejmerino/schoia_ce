@@ -4,8 +4,7 @@
 
 import { Materia, Prerrequisito } from "@/types";
 import { useState, useMemo } from 'react';
-// ==================== NUEVO: IMPORTAMOS ÍCONOS ====================
-import { CheckCircle, Lock, ArrowRight } from 'lucide-react';
+import { CheckCircle, Lock } from 'lucide-react';
 
 type MallaGridProps = {
   materias: Materia[];
@@ -25,10 +24,10 @@ export default function MallaGrid({ materias, prerrequisitos }: MallaGridProps) 
   const [materiasAprobadas, setMateriasAprobadas] = useState<Set<string>>(new Set());
 
   const { creditosAprobados, creditosTotales, progreso } = useMemo(() => {
-    const totales = materias.reduce((sum, m) => sum + m.creditos, 0);
+    const totales = materias.reduce((sum, materia) => sum + materia.creditos, 0);
     const aprobados = materias
-      .filter(m => materiasAprobadas.has(m.codigo))
-      .reduce((sum, m) => sum + m.creditos, 0);
+      .filter(materia => materiasAprobadas.has(materia.codigo))
+      .reduce((sum, materia) => sum + materia.creditos, 0);
     const porcentaje = totales > 0 ? Math.round((aprobados / totales) * 100) : 0;
     
     return { creditosAprobados: aprobados, creditosTotales: totales, progreso: porcentaje };
@@ -49,91 +48,132 @@ export default function MallaGrid({ materias, prerrequisitos }: MallaGridProps) 
     return disponibles;
   }, [materias, prerrequisitos, materiasAprobadas]);
   
+  // ==================== LÓGICA DE CLIC ACTUALIZADA CON CASCADA ====================
   const handleMateriaClick = (codigoMateria: string) => {
-    const isDisponible = materiasDisponibles.has(codigoMateria);
     const isAprobada = materiasAprobadas.has(codigoMateria);
     
-    if (!isDisponible && !isAprobada) return; // Lógica de bloqueo
-
     setMateriasAprobadas(prevAprobadas => {
       const newAprobadas = new Set(prevAprobadas);
-      newAprobadas.has(codigoMateria) ? newAprobadas.delete(codigoMateria) : newAprobadas.add(codigoMateria);
+
+      if (isAprobada) {
+        // --- Lógica de Deselección en Cascada ---
+        const aDesaprobar = new Set<string>([codigoMateria]);
+        let huboCambios = true;
+        
+        while (huboCambios) {
+          huboCambios = false;
+          // Buscamos materias aprobadas que dependan de las que estamos a punto de desaprobar
+          newAprobadas.forEach(codigoAprobado => {
+            if (aDesaprobar.has(codigoAprobado)) return; // Ya está en la lista para desaprobar
+
+            const requisitos = prerrequisitos
+              .filter(p => p.materiaCodigo === codigoAprobado)
+              .map(p => p.prerrequisitoCodigo);
+
+            if (requisitos.some(req => aDesaprobar.has(req))) {
+              aDesaprobar.add(codigoAprobado);
+              huboCambios = true;
+            }
+          });
+        }
+        
+        // Eliminamos todas las materias afectadas
+        aDesaprobar.forEach(codigo => newAprobadas.delete(codigo));
+        
+      } else {
+        // --- Lógica de Aprobación (solo si está disponible) ---
+        if (materiasDisponibles.has(codigoMateria)) {
+          newAprobadas.add(codigoMateria);
+        }
+      }
+      return newAprobadas;
+    });
+  };
+
+  const handleSelectSemestre = (materiasDelSemestre: Materia[]) => {
+    const codigosRelevantes = materiasDelSemestre
+      .filter(materia => materiasDisponibles.has(materia.codigo) || materiasAprobadas.has(materia.codigo))
+      .map(materia => materia.codigo);
+    if (codigosRelevantes.length === 0) return;
+    const todoSeleccionado = codigosRelevantes.every(codigo => materiasAprobadas.has(codigo));
+    setMateriasAprobadas(prevAprobadas => {
+      const newAprobadas = new Set(prevAprobadas);
+      if (todoSeleccionado) {
+        codigosRelevantes.forEach(codigo => newAprobadas.delete(codigo));
+      } else {
+        materiasDelSemestre
+          .filter(materia => materiasDisponibles.has(materia.codigo))
+          .forEach(materia => newAprobadas.add(materia.codigo));
+      }
       return newAprobadas;
     });
   };
 
   const semestres = agruparPorSemestre(materias);
   
-  // ================== NUEVO: LÓGICA PARA LÍNEAS DE CONEXIÓN ==================
-  // Creamos un mapa para encontrar rápidamente en qué semestre está cada materia
-  const materiaASemestreMap = new Map<string, number>();
-  materias.forEach(m => materiaASemestreMap.set(m.codigo, m.semestre));
-  
-  // =========================================================================
-
   return (
     <>
-      <div className="px-4 md:px-8 mb-8 max-w-5xl mx-auto">
+      <div className="px-4 md:px-8 mb-6 max-w-5xl mx-auto">
         <div className="flex justify-between items-center mb-2 text-slate-200">
-          <span className="font-bold text-lg">Progreso de la Carrera</span>
-          <span className="font-bold text-lg">{progreso}%</span>
+          <span className="font-bold text-base">Progreso de la Carrera</span>
+          <span className="font-bold text-base">{progreso}%</span>
         </div>
-        <div className="w-full bg-slate-800 rounded-full h-4 border-2 border-slate-700">
+        <div className="w-full bg-slate-800 rounded-full h-3.5 border border-slate-700">
           <div 
             className="bg-red-500 h-full rounded-full transition-all duration-500" 
             style={{ width: `${progreso}%` }}
           ></div>
         </div>
-        <div className="text-right text-sm text-slate-400 mt-1">
+        <div className="text-right text-xs text-slate-400 mt-1">
           {creditosAprobados} / {creditosTotales} créditos
         </div>
       </div>
 
-      <div className="relative flex gap-4 overflow-x-auto pb-8 px-4 md:px-8">
+      <div className="flex gap-3 overflow-x-auto pb-8 px-4 md:px-8">
         {Object.entries(semestres).map(([numeroSemestre, materiasDelSemestre]) => (
-          <div key={numeroSemestre} className="w-64 md:w-72 flex-shrink-0" id={`semestre-${numeroSemestre}`}>
-            <h2 className="text-center text-lg font-semibold text-slate-400 mb-3 tracking-widest">
+          <div key={numeroSemestre} className="w-[15rem] flex-shrink-0">
+            <h2 
+              onClick={() => handleSelectSemestre(materiasDelSemestre)}
+              className="text-center text-sm font-bold text-slate-500 mb-2 tracking-widest cursor-pointer hover:text-sky-400 transition-colors"
+              title="Aprobar/Desaprobar materias disponibles"
+            >
               {['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'][parseInt(numeroSemestre) - 1]}
             </h2>
-            <div className="space-y-3">
-              {materiasDelSemestre.map((materia, index) => {
+            <div className="space-y-2">
+              {materiasDelSemestre.map((materia) => {
                 const isAprobada = materiasAprobadas.has(materia.codigo);
                 const isDisponible = materiasDisponibles.has(materia.codigo);
                 const isBloqueada = !isAprobada && !isDisponible;
 
-                // ============ NUEVOS ESTILOS SUPER CLAROS ============
                 let cardStateStyles = "";
                 if (isAprobada) {
-                  cardStateStyles = "bg-green-600 border-green-500 text-white shadow-lg shadow-green-600/20";
+                  cardStateStyles = "bg-green-600/80 border-green-500 text-white";
                 } else if (isDisponible) {
-                  cardStateStyles = "bg-sky-600 border-sky-500 text-white hover:bg-sky-500 cursor-pointer shadow-lg shadow-sky-600/20 animate-pulse";
+                  cardStateStyles = "bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600 hover:border-sky-500 cursor-pointer";
                 } else { // Bloqueada
-                  cardStateStyles = "bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed opacity-50";
+                  cardStateStyles = "bg-slate-800/80 border-slate-700/80 text-slate-600 cursor-not-allowed opacity-60";
                 }
 
                 return (
                   <div 
-                    key={materia.codigo} 
-                    id={materia.codigo}
+                    key={materia.codigo}
                     onClick={() => handleMateriaClick(materia.codigo)}
-                    className={`relative p-3 rounded-lg border-2 transition-all duration-200 ${cardStateStyles}`}
+                    className={`relative p-2 rounded-md border transition-all duration-200 ${cardStateStyles}`}
                   >
-                    <div className="flex items-start justify-between">
-                      <p className="font-bold text-sm leading-tight pr-2 flex-1">{materia.nombre}</p>
-                      {/* ============ NUEVOS ÍCONOS DE ESTADO ============ */}
-                      <div>
-                        {isAprobada && <CheckCircle className="w-5 h-5 text-white" />}
-                        {isBloqueada && <Lock className="w-4 h-4 text-slate-500" />}
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-semibold text-xs leading-tight flex-1">{materia.nombre}</p>
+                      <div className="flex-shrink-0">
+                        {isAprobada && <CheckCircle className="w-4 h-4 text-white" />}
+                        {isBloqueada && <Lock className="w-3.5 h-3.5 text-slate-500" />}
                       </div>
                     </div>
-                    <p className="text-xs text-slate-400 mt-2">{materia.creditos} Créditos</p>
+                    <p className="text-[11px] text-slate-400 mt-1">{materia.creditos} Créditos</p>
                   </div>
                 );
               })}
             </div>
           </div>
         ))}
-        {/* Aquí podríamos renderizar las líneas SVG si quisiéramos */}
       </div>
     </>
   );
