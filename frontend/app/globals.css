@@ -1,3 +1,9 @@
+/* src/app/globals.css */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+body {
+  background-color: #020617; /* Un azul casi negro, muy oscuro */
+  color: #e2e8f0; /* Un blanco suave para el texto (slate-200) */
+}

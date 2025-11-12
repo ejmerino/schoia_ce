@@ -1,64 +1,86 @@
-// src/app/carreras/[carreraId]/malla/page.tsx
-import { Materia } from "@/types";
+// ARCHIVO: frontend/src/app/carreras/[carreraId]/malla/page.tsx
+
+"use client"; // <-- ¡LA SOLUCIÓN! Convertimos la página a Componente de Cliente.
+
+import { useState, useEffect } from 'react';
+import { useParams } from 'next/navigation';
+import { Materia, Prerrequisito } from "@/types";
 import Link from "next/link";
+import MallaGrid from "./MallaGrid"; // El componente interactivo sigue igual.
 
-type MallaPageProps = {
-  params: {
-    carreraId: string;
-  }
-}
+export default function MallaPage() {
+  // Hooks para manejar el estado de los datos, carga y errores
+  const [materias, setMaterias] = useState<Materia[]>([]);
+  const [prerrequisitos, setPrerrequisitos] = useState<Prerrequisito[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-async function getMaterias(carreraId: string): Promise<Materia[]> {
-  try {
-    const res = await fetch(`http://localhost:8080/api/materias?carreraId=${carreraId}`, { cache: 'no-store' });
-    if (!res.ok) return [];
-    return res.json();
-  } catch (error) {
-    console.error("Error fetching materias:", error);
-    return [];
-  }
-}
+  // Hook para leer el 'carreraId' de la URL en el navegador
+  const params = useParams();
+  const carreraId = params.carreraId as string;
 
-// Función para agrupar materias por semestre
-const agruparPorSemestre = (materias: Materia[]) => {
-  return materias.reduce((acc, materia) => {
-    const semestre = materia.semestre;
-    if (!acc[semestre]) {
-      acc[semestre] = [];
+  // useEffect para buscar los datos cuando el componente se carga en el navegador
+  useEffect(() => {
+    if (!carreraId) {
+      setError("No se pudo obtener el ID de la carrera desde la URL.");
+      setIsLoading(false);
+      return;
     }
-    acc[semestre].push(materia);
-    return acc;
-  }, {} as Record<number, Materia[]>);
-};
 
+    const fetchMallaData = async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+        
+        // Hacemos las dos llamadas a la API en paralelo
+        const [materiasRes, prerrequisitosRes] = await Promise.all([
+          fetch(`http://localhost:8080/api/materias?carreraId=${carreraId}`),
+          fetch(`http://localhost:8080/api/prerrequisitos?carreraId=${carreraId}`)
+        ]);
 
-export default async function MallaPage({ params }: MallaPageProps) {
-  const { carreraId } = params;
-  const materias = await getMaterias(carreraId);
-  const semestres = agruparPorSemestre(materias);
+        if (!materiasRes.ok || !prerrequisitosRes.ok) {
+          throw new Error("Una de las peticiones a la API falló.");
+        }
 
+        const materiasData = await materiasRes.json();
+        const prerrequisitosData = await prerrequisitosRes.json();
+
+        setMaterias(materiasData);
+        setPrerrequisitos(prerrequisitosData);
+
+      } catch (err: any) {
+        console.error("Error al obtener los datos de la malla:", err);
+        setError(err.message || "Ocurrió un error al cargar la malla.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchMallaData();
+  }, [carreraId]); // El efecto se vuelve a ejecutar si el carreraId cambia
+
+  // Renderizamos la UI basándonos en el estado
   return (
-    <div className="min-h-screen bg-gray-950 text-white p-4 md:p-8">
-      <header className="mb-8">
+    <div className="min-h-screen bg-gray-950 text-white flex flex-col">
+      <header className="p-4 md:p-8">
         <Link href="/universidades" className="text-blue-400 hover:underline">&larr; Volver a seleccionar carrera</Link>
-        <h1 className="text-3xl md:text-5xl font-bold text-center mt-4">Malla Curricular</h1>
+        <h1 className="text-3xl md:text-5xl font-bold text-center mt-4">Malla Curricular Interactiva</h1>
+         <p className="text-center text-gray-400 mt-2">Haz clic en las materias que ya aprobaste.</p>
       </header>
 
-      <div className="grid grid-flow-col auto-cols-max gap-4 overflow-x-auto pb-4">
-        {Object.entries(semestres).map(([numeroSemestre, materiasDelSemestre]) => (
-          <div key={numeroSemestre} className="w-64 bg-gray-900 p-3 rounded-lg flex-shrink-0">
-            <h2 className="text-xl font-bold text-center border-b border-gray-700 pb-2 mb-3">Semestre {numeroSemestre}</h2>
-            <div className="space-y-2">
-              {materiasDelSemestre.map((materia) => (
-                <div key={materia.codigo} className="bg-gray-800 p-3 rounded-md cursor-pointer hover:bg-blue-900/50">
-                  <p className="font-semibold text-sm">{materia.nombre}</p>
-                  <p className="text-xs text-gray-400">{materia.creditos} créditos</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
+      <main className="flex-grow">
+        {isLoading && <p className="text-center text-gray-400">Cargando malla...</p>}
+        
+        {error && <p className="text-center text-red-400">Error: {error}</p>}
+        
+        {!isLoading && !error && materias.length > 0 && (
+          <MallaGrid materias={materias} prerrequisitos={prerrequisitos} />
+        )}
+
+        {!isLoading && !error && materias.length === 0 && (
+          <p className="text-center text-yellow-400">No se encontraron materias para esta carrera.</p>
+        )}
+      </main>
     </div>
   );
 }

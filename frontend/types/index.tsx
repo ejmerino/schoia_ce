@@ -27,3 +27,9 @@ export interface Materia {
   semestre: number;
   carreraId: number;
 }
+
+// ...
+export interface Prerrequisito {
+  materiaCodigo: string;
+  prerrequisitoCodigo: string;
+}
